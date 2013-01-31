@@ -1,6 +1,6 @@
 package org.vertx.java.tests.core.http;
 
-import org.vertx.java.framework.TestBase;
+import org.vertx.java.testframework.TestBase;
 
 /**
  * @author <a href="https://github.com/sjhorn">Scott Horn</a>
@@ -33,7 +33,7 @@ public class PythonHttpTest  extends TestBase {
     public void test_put_ssl() {
       startTest(getMethodName());
     }
-    
+
     public void test_post() {
       startTest(getMethodName());
     }

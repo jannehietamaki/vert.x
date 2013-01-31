@@ -29,8 +29,9 @@ artifacts {
 }
 
 groovydoc {
+  excludes = ["**/impl/**"]
 	destinationDir = file("build/docs/groovy/api")
 	outputs.dir destinationDir
 }
 
-javadoc.dependsOn groovydoc
+//javadoc.dependsOn groovydoc

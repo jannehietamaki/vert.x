@@ -7,7 +7,7 @@
 ##############################################################################
 
 # Add default JVM options here. You can also use JAVA_OPTS and VERTX_OPTS to pass JVM options to this script.
-DEFAULT_JVM_OPTS="-XX:+CMSClassUnloadingEnabled"
+DEFAULT_JVM_OPTS="-XX:+CMSClassUnloadingEnabled -XX:-UseGCOverheadLimit"
 
 APP_NAME="vertx"
 APP_BASE_NAME=`basename "$0"`
@@ -65,13 +65,11 @@ cd "`dirname \"$PRG\"`/../../.."
 APP_HOME="`pwd -P`"
 cd "$SAVED"
 
-CLASSPATH=$APP_HOME/vertx-core/build/libs/*:$APP_HOME/vertx-platform/build/libs/*:$APP_HOME/vertx-core/build/deps/compile/*:\
+CLASSPATH=$APP_HOME/extralibs/*:$APP_HOME/vertx-core/build/libs/*:$APP_HOME/vertx-platform/build/libs/*:$APP_HOME/vertx-core/build/deps/compile/*:\
 $APP_HOME/vertx-lang/vertx-lang-groovy/build/deps/compile/*:$APP_HOME/vertx-lang/vertx-lang-java/build/deps/compile/*:\
 $APP_HOME/vertx-lang/vertx-lang-jruby/build/deps/compile/*:$APP_HOME/vertx-lang/vertx-lang-jython/build/deps/compile/*:\
-$APP_HOME/vertx-lang/vertx-lang-rhino/build/deps/compile/*:\
 $APP_HOME/vertx-lang/vertx-lang-groovy/build/libs/*:$APP_HOME/vertx-lang/vertx-lang-java/build/libs/*:\
 $APP_HOME/vertx-lang/vertx-lang-jruby/build/libs/*:$APP_HOME/vertx-lang/vertx-lang-jython/build/libs/*:\
-$APP_HOME/vertx-lang/vertx-lang-rhino/build/libs/*:\
 $APP_HOME/src/dist/conf
 
 # Determine the Java command to use to start the JVM.
@@ -173,4 +171,4 @@ eval splitJvmOpts $DEFAULT_JVM_OPTS $JAVA_OPTS $VERTX_OPTS
 
 exec "$JAVACMD" "${JVM_OPTS[@]}" -Dpython.options.internalTablesImpl=weak\
  -Djava.util.logging.config.file=$APP_HOME/src/dist/conf/logging.properties\
- -Djruby.home=$JRUBY_HOME -classpath "$CLASSPATH" org.vertx.java.deploy.impl.cli.Starter "$@"
+ -classpath "$CLASSPATH" org.vertx.java.deploy.impl.cli.Starter "$@"

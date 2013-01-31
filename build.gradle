@@ -18,7 +18,10 @@ apply from: 'gradle/extra-tasks.gradle'
 
 buildscript {
   repositories {
-    // mavenLocal()
+    flatDir {
+      dir 'extralibs'
+    }
+    mavenLocal()
     maven { url 'https://oss.sonatype.org/content/repositories/snapshots' }
     mavenCentral()
   }
@@ -149,7 +152,7 @@ task assemble(type: Copy, dependsOn: ['preflight', subprojects.assemble]) {
     from subprojects.configurations.platform
     from subprojects.configurations.compile
     // Don't just include everything!!
-    includes = ["groovy*.jar", "jackson*.jar", "rhino*.jar", "netty*.jar", "hazelcast*.jar", "vertx*.jar"]
+    includes = ["groovy*.jar", "jackson*.jar", "netty*.jar", "hazelcast*.jar", "vertx*.jar"]
   }
   doLast {
     project.ant.chmod(file: "build/$rootProject.name-$version/bin", perm: 'ugo+x')
@@ -171,6 +174,9 @@ task javadocs(type: Javadoc, dependsOn: subprojects.javadoc) {
   source = subprojects.sourceSets.main.java
   classpath = files(subprojects.configurations.compile)
 
+  excludes = ["**/impl/**"]
+  includes = ["**/core/**", "**/deploy/**"]
+
   destinationDir file("build/$rootProject.name-$version/api-docs/java/api")
   inputs.files classpath
   outputs.dir destinationDir
@@ -186,7 +192,7 @@ task nonJavadocs(type: Copy) {
   outputs.dir destinationDir
   
   doFirst {
-    ['groovy/api', 'javascript/api', 'python/api', 'ruby/api'].each { dir->
+    ['groovy/api', 'python/api'].each { dir->
       mkdir("$rootDir/build/$rootProject.name-$version/api-docs/$dir")
     }
   }
@@ -197,12 +203,6 @@ task nonJavadocs(type: Copy) {
   }
   into('python') {
     from file('vertx-lang/vertx-lang-jython/build/docs/python')
-  }
-  into('ruby') {
-    from file('vertx-lang/vertx-lang-jruby/build/docs/ruby')
-  }
-  into('javascript') {
-    from file('vertx-lang/vertx-lang-rhino/build/docs/javascript')
   }
 }
 

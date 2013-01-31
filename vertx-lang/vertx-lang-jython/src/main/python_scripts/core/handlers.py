@@ -27,11 +27,18 @@ class DoneHandler(org.vertx.java.core.Handler):
 
     def handle(self, arg=None):
         """ Call the handler when done """
-        if self.handler != None:
-            if arg != None:
-                self.handler(arg)
-            else:
-                self.handler()
+        if self.handler is not None:
+            self.handler(arg)
+
+class NullDoneHandler(org.vertx.java.core.Handler):
+    """ Null Done handler """
+    def __init__(self, handler):
+        self.handler = handler
+
+    def handle(self, arg=None):
+        """ Call the handler when done """
+        if self.handler is not None:
+            self.handler()
 
 class ContinueHandler(org.vertx.java.core.Handler):
     """ Continue handler """

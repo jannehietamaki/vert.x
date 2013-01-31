@@ -27,7 +27,7 @@ import org.vertx.java.core.net.NetClient;
 import org.vertx.java.core.net.NetServer;
 import org.vertx.java.core.net.NetSocket;
 import org.vertx.java.core.streams.Pump;
-import org.vertx.java.framework.TestBase;
+import org.vertx.java.testframework.TestBase;
 import vertx.tests.core.http.TLSTestParams;
 import vertx.tests.core.net.*;
 
@@ -398,7 +398,6 @@ public class JavaNetTest extends TestBase {
 
     assertTrue(latch.await(5, TimeUnit.SECONDS));
   }
-
 
   @Test
   public void testFanout() throws Exception {

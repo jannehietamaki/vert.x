@@ -21,18 +21,14 @@ import org.vertx.java.core.SimpleHandler;
 import org.vertx.java.core.buffer.Buffer;
 import org.vertx.java.core.eventbus.Message;
 import org.vertx.java.core.http.*;
-import org.vertx.java.framework.TestClientBase;
-import org.vertx.java.framework.TestUtils;
+import org.vertx.java.testframework.TestClientBase;
+import org.vertx.java.testframework.TestUtils;
 
 import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.OutputStreamWriter;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Random;
+import java.util.*;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -457,6 +453,33 @@ public class HttpTestClient extends TestClientBase {
       public void handle(HttpClientResponse resp) {
         tu.checkContext();
         tu.testComplete();
+      }
+    }).end();
+  }
+
+  public void testHeadNoBody() {
+    startServer(new Handler<HttpServerRequest>() {
+      public void handle(HttpServerRequest req) {
+        tu.checkContext();
+        tu.azzert(req.method.equals("HEAD"));
+        // Head never contains a body but it can contain a Content-Length header
+        // Since headers from HEAD must correspond EXACTLY with corresponding headers for GET
+        req.response.putHeader("Content-Length", 41);
+        req.response.end();
+      }
+    });
+
+    getRequest(true, "HEAD", "some-uri", new Handler<HttpClientResponse>() {
+      public void handle(HttpClientResponse resp) {
+        tu.checkContext();
+        tu.azzert(Integer.valueOf(resp.headers().get("Content-Length")) == 41);
+        resp.endHandler(new SimpleHandler() {
+          @Override
+          protected void handle() {
+            tu.testComplete();
+          }
+        });
+
       }
     }).end();
   }
@@ -2171,7 +2194,6 @@ public class HttpTestClient extends TestClientBase {
 
     final Handler<String> checkEndHandler = new Handler<String>() {
       public void handle(final String name) {
-        System.out.println(name + " exception called");
         if (clientExceptions.get() == 1 && req2Exceptions.get() ==1  && req3Exceptions.get() ==1) {
           tu.checkContext();
           tu.testComplete();

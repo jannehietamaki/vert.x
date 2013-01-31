@@ -23,7 +23,6 @@ import org.jboss.netty.channel.socket.nio.NioClientSocketChannelFactory;
 import org.jboss.netty.channel.socket.nio.NioSocketChannel;
 import org.jboss.netty.handler.codec.http.HttpChunk;
 import org.jboss.netty.handler.codec.http.HttpChunkTrailer;
-import org.jboss.netty.handler.codec.http.HttpRequestEncoder;
 import org.jboss.netty.handler.codec.http.HttpResponse;
 import org.jboss.netty.handler.ssl.SslHandler;
 import org.vertx.java.core.Handler;
@@ -377,8 +376,7 @@ public class DefaultHttpClient implements HttpClient {
             engine.setUseClientMode(true); //We are on the client side of the connection
             pipeline.addLast("ssl", new SslHandler(engine));
           }
-          pipeline.addLast("encoder", new HttpRequestEncoder());
-          pipeline.addLast("decoder", new SwitchingHttpResponseDecoder());
+          pipeline.addLast("codec", new SwitchingHttpClientCodec());
           pipeline.addLast("handler", new ClientHandler());
           return pipeline;
         }

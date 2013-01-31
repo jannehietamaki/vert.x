@@ -20,24 +20,25 @@ apply plugin: 'groovy'
 sourceSets {
 	main {
 		resources {
-			srcDirs "src/main/ruby_scripts", "src/main/python_scripts", "src/main/groovy_scripts", "src/main/javascript_scripts"
+			srcDirs "src/main/ruby_scripts", "src/main/python_scripts", "src/main/groovy_scripts"
 		}
 	}
 	test {
 		resources {
-			srcDirs "src/test/ruby_scripts", "src/test/python_scripts", "src/test/groovy_scripts",
-          "src/test/javascript_scripts",
-          "../src/dist/conf"
+			srcDirs "src/test/ruby_scripts", "src/test/python_scripts", "src/test/groovy_scripts", "../src/dist/conf"
 		}
 	}
 }
 
 dependencies {
+  compile files('../extralibs/jython.jar')
 	compile "junit:junit:$junitVersion" // provide exportable components
   compile project(':vertx-testframework')
 }
 
 test {
+  outputs.upToDateWhen { false }
+
   testLogging.showStandardStreams = true
 
 	systemProperty 'vertx.test.timeout', 15

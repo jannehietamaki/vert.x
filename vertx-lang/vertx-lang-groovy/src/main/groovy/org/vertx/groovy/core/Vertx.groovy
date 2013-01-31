@@ -31,11 +31,13 @@ import org.vertx.java.core.Handler
 import org.vertx.java.core.impl.DefaultVertx
 import org.vertx.java.core.impl.VertxInternal
 import org.vertx.java.core.shareddata.SharedData
+import org.vertx.java.deploy.impl.VertxLocator
+
 
 /**
  * The control centre of vert.x<p>
  * You should normally only use a single instance of this class throughout your application. If you are running in the
- * vert.x container an instance will be provided to you.<p>
+ * vert.x scontainer an instance will be provided to you.<p>
  * If you are using vert.x embedded, you can create an instance using one of the static {@code newVertx} methods.<p>
  * This class acts as a factory for TCP/SSL and HTTP/HTTPS servers and clients, SockJS servers, and provides an
  * instance of the event bus, file system and shared data classes, as well as methods for setting and cancelling
@@ -53,6 +55,13 @@ class Vertx {
     this.jVertex = jVertex
     this.eventBus = new EventBus(jVertex.eventBus())
     this.fileSystem = new org.vertx.groovy.core.file.FileSystem(jVertex.fileSystem)
+  }
+
+  /**
+   * Create a non clustered Vertx instance
+   */
+  static Vertx locate() {
+    return new Vertx(VertxLocator.vertx)
   }
 
   /**

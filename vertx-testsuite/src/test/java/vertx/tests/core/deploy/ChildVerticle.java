@@ -25,11 +25,10 @@ public class ChildVerticle extends Verticle {
 
   @Override
   public void start() throws Exception {
-    vertx.eventBus().send("test-handler", "started");
+    container.deployVerticle(SubChildVerticle.class.getName());
   }
 
   @Override
   public void stop() throws Exception {
-    vertx.eventBus().send("test-handler", "stopped");
   }
 }

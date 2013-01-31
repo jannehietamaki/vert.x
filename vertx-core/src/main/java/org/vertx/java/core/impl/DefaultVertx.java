@@ -18,10 +18,7 @@ package org.vertx.java.core.impl;
 
 import org.jboss.netty.channel.socket.nio.NioWorker;
 import org.jboss.netty.channel.socket.nio.NioWorkerPool;
-import org.jboss.netty.util.HashedWheelTimer;
-import org.jboss.netty.util.Timeout;
-import org.jboss.netty.util.Timer;
-import org.jboss.netty.util.TimerTask;
+import org.jboss.netty.util.*;
 import org.vertx.java.core.Handler;
 import org.vertx.java.core.eventbus.EventBus;
 import org.vertx.java.core.eventbus.impl.DefaultEventBus;
@@ -42,32 +39,32 @@ import org.vertx.java.core.net.impl.ServerID;
 import org.vertx.java.core.shareddata.SharedData;
 import org.vertx.java.core.sockjs.SockJSServer;
 import org.vertx.java.core.sockjs.impl.DefaultSockJSServer;
-import org.vertx.java.core.utils.lang.Windows;
 
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
 
-/**
+/**                                                e
  * @author <a href="http://tfox.org">Tim Fox</a>
  */
 public class DefaultVertx extends VertxInternal {
 
   private static final Logger log = LoggerFactory.getLogger(DefaultVertx.class);
 
-  private static final int DEFAULT_WORKER_POOL_SIZE = 20;
-
   private final FileSystem fileSystem = getFileSystem();
   private final EventBus eventBus;
   private final SharedData sharedData = new SharedData();
 
-  private int backgroundPoolSize;
+  private ThreadPoolExecutor backgroundPool = VertxExecutorFactory.workerPool("vert.x-worker-thread-");
+  private OrderedExecutorFactory orderedFact = new OrderedExecutorFactory(backgroundPool);
+
   private int corePoolSize = Runtime.getRuntime().availableProcessors();
-  private ExecutorService backgroundPool;
-  private OrderedExecutorFactory orderedFact;
-  private NioWorkerPool workerPool;
-  private ExecutorService acceptorPool;
+  private NioWorkerPool corePool =
+      new NioWorkerPool(VertxExecutorFactory.eventPool("vert.x-core-thread-"), corePoolSize);
+
+  private ThreadPoolExecutor acceptorPool = VertxExecutorFactory.acceptorPool("vert.x-acceptor-thread-");
+
   private Map<ServerID, DefaultHttpServer> sharedHttpServers = new HashMap<>();
   private Map<ServerID, DefaultNetServer> sharedNetServers = new HashMap<>();
 
@@ -84,25 +81,20 @@ public class DefaultVertx extends VertxInternal {
   private final Map<Long, TimeoutHolder> timeouts = new ConcurrentHashMap<>();
 
   public DefaultVertx() {
-    configure();
     this.eventBus = new DefaultEventBus(this);
   }
 
   public DefaultVertx(String hostname) {
-    configure();
     this.eventBus = new DefaultEventBus(this, hostname);
   }
 
   public DefaultVertx(int port, String hostname) {
-    configure();
     this.eventBus = new DefaultEventBus(this, port, hostname);
   }
 
-  /**
-   * deal with configuration parameters
-   */
-  private void configure() {
-    this.backgroundPoolSize = Integer.getInteger("vertx.backgroundPoolSize", DEFAULT_WORKER_POOL_SIZE);
+  static {
+    // Stop netty renaming threads!
+    ThreadRenamingRunnable.setThreadNameDeterminer(ThreadNameDeterminer.CURRENT);
   }
 
   /**
@@ -193,51 +185,19 @@ public class DefaultVertx extends VertxInternal {
     });
   }
 
-  //The worker pool is used for making blocking calls to legacy synchronous APIs
+  // The background pool is used for making blocking calls to legacy synchronous APIs
   public ExecutorService getBackgroundPool() {
-    //This is a correct implementation of double-checked locking idiom
-    ExecutorService result = backgroundPool;
-    if (result == null) {
-      synchronized (this) {
-        result = backgroundPool;
-        if (result == null) {
-          backgroundPool = result = Executors.newFixedThreadPool(backgroundPoolSize, new VertxThreadFactory("vert.x-worker-thread-"));
-          orderedFact = new OrderedExecutorFactory(backgroundPool);
-        }
-      }
-    }
-    return result;
+    return backgroundPool;
   }
 
-  public NioWorkerPool getWorkerPool() {
-    //This is a correct implementation of double-checked locking idiom
-    NioWorkerPool result = workerPool;
-    if (result == null) {
-      synchronized (this) {
-        result = workerPool;
-        if (result == null) {
-          ExecutorService corePool = Executors.newFixedThreadPool(corePoolSize, new VertxThreadFactory("vert.x-core-thread-"));
-          workerPool = result = new NioWorkerPool(corePool, corePoolSize);
-        }
-      }
-    }
-    return result;
+  public NioWorkerPool getCorePool() {
+    return corePool;
   }
 
-  //We use a cached pool, but it will never get large since only used for acceptors.
-  //There will be one thread for each port listening on
+  // We use a cached pool, but it will never get large since only used for acceptors.
+  // There will be one thread for each port listening on
   public Executor getAcceptorPool() {
-    //This is a correct implementation of double-checked locking idiom
-    ExecutorService result = acceptorPool;
-    if (result == null) {
-      synchronized (this) {
-        result = acceptorPool;
-        if (result == null) {
-          acceptorPool = result = Executors.newCachedThreadPool(new VertxThreadFactory("vert.x-acceptor-thread-"));
-        }
-      }
-    }
-    return result;
+    return acceptorPool;
   }
 
   public Context getOrAssignContext() {
@@ -285,7 +245,7 @@ public class DefaultVertx extends VertxInternal {
         }
       };
     }
-    long timerID = scheduleTimeout(-1, context, myHandler, delay);
+    final long timerID = scheduleTimeout(-1, context, myHandler, delay);
     myHandler.timerID = timerID;
     return timerID;
   }
@@ -296,7 +256,7 @@ public class DefaultVertx extends VertxInternal {
 
   public Context createEventLoopContext() {
     getBackgroundPool();
-    NioWorker worker = getWorkerPool().nextWorker();
+    NioWorker worker = getCorePool().nextWorker();
     return new EventLoopContext(this, orderedFact.getExecutor(), worker);
   }
 
@@ -322,7 +282,7 @@ public class DefaultVertx extends VertxInternal {
     }
     Timeout timeout = timer.newTimeout(ttask, delay, TimeUnit.MILLISECONDS);
     id = id != -1 ? id : timeoutCounter.getAndIncrement();
-    timeouts.put(id, new TimeoutHolder(timeout, context));
+    timeouts.put(id, new TimeoutHolder(timeout));
     return id;
   }
 
@@ -395,9 +355,9 @@ public class DefaultVertx extends VertxInternal {
 		}
 
 		// log.info("Release external resources from worker pool");
-		if (workerPool != null) {
-			workerPool.releaseExternalResources();
-			workerPool = null;
+		if (corePool != null) {
+			corePool.releaseExternalResources();
+			corePool = null;
 		}
 		// log.info("Release external resources: done");
 
@@ -419,11 +379,9 @@ public class DefaultVertx extends VertxInternal {
 
   private static class TimeoutHolder {
     final Timeout timeout;
-    // final Context context;
 
-    TimeoutHolder(Timeout timeout, Context context) {
+    TimeoutHolder(Timeout timeout) {
       this.timeout = timeout;
-      // this.context = context;
     }
   }
 }
