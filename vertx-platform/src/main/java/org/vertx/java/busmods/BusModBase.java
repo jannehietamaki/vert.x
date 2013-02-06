@@ -21,7 +21,7 @@ import org.vertx.java.core.eventbus.Message;
 import org.vertx.java.core.json.JsonArray;
 import org.vertx.java.core.json.JsonObject;
 import org.vertx.java.core.logging.Logger;
-import org.vertx.java.deploy.Verticle;
+import org.vertx.java.platform.Verticle;
 
 /**
  * Base helper class for Java busmods
@@ -38,14 +38,11 @@ public abstract class BusModBase extends Verticle {
   /**
    * Start the busmod
    */
-  public final void start() {
+  public void start() {
     eb = vertx.eventBus();
     config = container.getConfig();
     logger = container.getLogger();
-    startMod();
   }
-
-  public abstract void startMod();
 
   protected void sendOK(Message<JsonObject> message) {
     sendOK(message, null);

@@ -39,6 +39,9 @@ import java.net.InetSocketAddress;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
+/**
+ * @author <a href="http://tfox.org">Tim Fox</a>
+ */
 public class DefaultNetClient implements NetClient {
 
   private static final Logger log = LoggerFactory.getLogger(DefaultNetClient.class);
@@ -47,7 +50,6 @@ public class DefaultNetClient implements NetClient {
   private final EventLoopContext ctx;
   private final TCPSSLHelper tcpHelper = new TCPSSLHelper();
   private ClientBootstrap bootstrap;
-  private NioClientSocketChannelFactory channelFactory;
   private Map<Channel, DefaultNetSocket> socketMap = new ConcurrentHashMap<>();
   private Handler<Exception> exceptionHandler;
   private int reconnectAttempts;
@@ -143,10 +145,6 @@ public class DefaultNetClient implements NetClient {
     return tcpHelper.getConnectTimeout();
   }
 
-  public Integer getBossThreads() {
-    return tcpHelper.getClientBossThreads();
-  }
-
   public NetClient setTCPNoDelay(boolean tcpNoDelay) {
     tcpHelper.setTCPNoDelay(tcpNoDelay);
     return this;
@@ -184,11 +182,6 @@ public class DefaultNetClient implements NetClient {
 
   public NetClient setConnectTimeout(long timeout) {
     tcpHelper.setConnectTimeout(timeout);
-    return this;
-  }
-
-  public NetClient setBossThreads(int threads) {
-    tcpHelper.setClientBossThreads(threads);
     return this;
   }
 
@@ -262,10 +255,8 @@ public class DefaultNetClient implements NetClient {
       VertxWorkerPool pool = new VertxWorkerPool();
       pool.addWorker(ctx.getWorker());
 
-      Integer bossThreads = tcpHelper.getClientBossThreads();
-      int threads = bossThreads == null ? 1 : bossThreads;
-      channelFactory = new NioClientSocketChannelFactory(
-          vertx.getAcceptorPool(), threads, pool, vertx.getTimer());
+      NioClientSocketChannelFactory channelFactory = new NioClientSocketChannelFactory(
+          vertx.getClientAcceptorPool(), pool);
       bootstrap = new ClientBootstrap(channelFactory);
 
       tcpHelper.checkSSL(vertx);

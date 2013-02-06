@@ -65,11 +65,9 @@ cd "`dirname \"$PRG\"`/../../.."
 APP_HOME="`pwd -P`"
 cd "$SAVED"
 
-CLASSPATH=$APP_HOME/extralibs/*:$APP_HOME/vertx-core/build/libs/*:$APP_HOME/vertx-platform/build/libs/*:$APP_HOME/vertx-core/build/deps/compile/*:\
-$APP_HOME/vertx-lang/vertx-lang-groovy/build/deps/compile/*:$APP_HOME/vertx-lang/vertx-lang-java/build/deps/compile/*:\
-$APP_HOME/vertx-lang/vertx-lang-jruby/build/deps/compile/*:$APP_HOME/vertx-lang/vertx-lang-jython/build/deps/compile/*:\
-$APP_HOME/vertx-lang/vertx-lang-groovy/build/libs/*:$APP_HOME/vertx-lang/vertx-lang-java/build/libs/*:\
-$APP_HOME/vertx-lang/vertx-lang-jruby/build/libs/*:$APP_HOME/vertx-lang/vertx-lang-jython/build/libs/*:\
+CLASSPATH=$APP_HOME/extralibs/*:$APP_HOME/vertx-core/build/libs/*:\
+$APP_HOME/vertx-platform/build/libs/*:\
+$APP_HOME/vertx-core/build/deps/compile/*:\
 $APP_HOME/src/dist/conf
 
 # Determine the Java command to use to start the JVM.
@@ -171,4 +169,4 @@ eval splitJvmOpts $DEFAULT_JVM_OPTS $JAVA_OPTS $VERTX_OPTS
 
 exec "$JAVACMD" "${JVM_OPTS[@]}" -Dpython.options.internalTablesImpl=weak\
  -Djava.util.logging.config.file=$APP_HOME/src/dist/conf/logging.properties\
- -classpath "$CLASSPATH" org.vertx.java.deploy.impl.cli.Starter "$@"
+ -classpath "$CLASSPATH" org.vertx.java.platform.impl.cli.Starter "$@"

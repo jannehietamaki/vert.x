@@ -122,13 +122,11 @@ public abstract class Context {
 
   private void decOustanding() {
     if (outstandingTasks.decrementAndGet() == 0) {
+      closedHandler.handle(null);
       // Now there are no more oustanding tasks we can close the context
       close();
-      closedHandler.handle(null);
     }
   }
-
-  private boolean justSet;
 
   public void closedHandler(Handler<Void> closedHandler) {
     this.closedHandler = closedHandler;

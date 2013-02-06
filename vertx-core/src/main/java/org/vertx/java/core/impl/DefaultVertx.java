@@ -16,6 +16,9 @@
 
 package org.vertx.java.core.impl;
 
+import org.jboss.netty.channel.DefaultChannelFuture;
+import org.jboss.netty.channel.socket.nio.NioClientBossPool;
+import org.jboss.netty.channel.socket.nio.NioServerBossPool;
 import org.jboss.netty.channel.socket.nio.NioWorker;
 import org.jboss.netty.channel.socket.nio.NioWorkerPool;
 import org.jboss.netty.util.*;
@@ -56,14 +59,11 @@ public class DefaultVertx extends VertxInternal {
   private final EventBus eventBus;
   private final SharedData sharedData = new SharedData();
 
-  private ThreadPoolExecutor backgroundPool = VertxExecutorFactory.workerPool("vert.x-worker-thread-");
+  private ExecutorService backgroundPool = VertxExecutorFactory.workerPool("vert.x-worker-thread-");
   private OrderedExecutorFactory orderedFact = new OrderedExecutorFactory(backgroundPool);
-
-  private int corePoolSize = Runtime.getRuntime().availableProcessors();
-  private NioWorkerPool corePool =
-      new NioWorkerPool(VertxExecutorFactory.eventPool("vert.x-core-thread-"), corePoolSize);
-
-  private ThreadPoolExecutor acceptorPool = VertxExecutorFactory.acceptorPool("vert.x-acceptor-thread-");
+  private NioWorkerPool corePool = VertxExecutorFactory.corePool("vert.x-core-thread-");
+  private NioServerBossPool serverBossPool = VertxExecutorFactory.serverAcceptorPool("vert.x-server-acceptor-thread-");
+  private NioClientBossPool clientBossPool = VertxExecutorFactory.clientAcceptorPool("vert.x-client-acceptor-thread-");
 
   private Map<ServerID, DefaultHttpServer> sharedHttpServers = new HashMap<>();
   private Map<ServerID, DefaultNetServer> sharedNetServers = new HashMap<>();
@@ -95,6 +95,7 @@ public class DefaultVertx extends VertxInternal {
   static {
     // Stop netty renaming threads!
     ThreadRenamingRunnable.setThreadNameDeterminer(ThreadNameDeterminer.CURRENT);
+    DefaultChannelFuture.setUseDeadLockChecker(false);
   }
 
   /**
@@ -194,10 +195,12 @@ public class DefaultVertx extends VertxInternal {
     return corePool;
   }
 
-  // We use a cached pool, but it will never get large since only used for acceptors.
-  // There will be one thread for each port listening on
-  public Executor getAcceptorPool() {
-    return acceptorPool;
+  public NioServerBossPool getServerAcceptorPool() {
+    return serverBossPool;
+  }
+
+  public NioClientBossPool getClientAcceptorPool() {
+    return clientBossPool;
   }
 
   public Context getOrAssignContext() {
@@ -324,16 +327,8 @@ public class DefaultVertx extends VertxInternal {
 			timer = null;
 		}
 
-		if (eventBus != null) {
-			eventBus.close(null);
-		}
-
 		if (backgroundPool != null) {
 			backgroundPool.shutdown();
-		}
-
-		if (acceptorPool != null) {
-			acceptorPool.shutdown();
 		}
 
 		try {
@@ -345,21 +340,20 @@ public class DefaultVertx extends VertxInternal {
 			// ignore
 		}
 
-		try {
-			if (acceptorPool != null) {
-				acceptorPool.awaitTermination(20, TimeUnit.SECONDS);
-				acceptorPool = null;
-			}
-		} catch (InterruptedException ex) {
-			// ignore
-		}
+    if (clientBossPool != null) {
+      clientBossPool.releaseExternalResources();
+      clientBossPool = null;
+    }
 
-		// log.info("Release external resources from worker pool");
+    if (serverBossPool != null) {
+      serverBossPool.releaseExternalResources();
+      serverBossPool = null;
+    }
+
 		if (corePool != null) {
 			corePool.releaseExternalResources();
 			corePool = null;
 		}
-		// log.info("Release external resources: done");
 
 		setContext(null);
 	}

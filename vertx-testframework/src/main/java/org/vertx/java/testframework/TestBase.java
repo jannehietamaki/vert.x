@@ -26,7 +26,7 @@ import org.vertx.java.core.impl.VertxInternal;
 import org.vertx.java.core.json.JsonObject;
 import org.vertx.java.core.logging.Logger;
 import org.vertx.java.core.logging.impl.LoggerFactory;
-import org.vertx.java.deploy.impl.VerticleManager;
+import org.vertx.java.platform.impl.VerticleManager;
 
 import java.lang.reflect.Method;
 import java.net.URL;
@@ -141,7 +141,6 @@ public class TestBase extends TestCase {
     if (verticleManager.checkNoModules() > 0) {
       fail("Module references remain after test");
     }
-    verticleManager.stop();
   }
 
   protected String startApp(String main) throws Exception {
@@ -177,10 +176,6 @@ public class TestBase extends TestCase {
   }
 
   protected String startApp(boolean worker, String main, JsonObject config, int instances, boolean await) throws Exception {
-    if (Runtime.getRuntime().availableProcessors() < 2) {
-      log.error("*** The test framework requires at least 2 processors ***");
-      fail("The test framework requires at least 2 processors");
-    }
     URL url;
     if (main.endsWith(".js") || main.endsWith(".rb") || main.endsWith(".groovy") || main.endsWith(".py")) {
       url = getClass().getClassLoader().getResource(main);
