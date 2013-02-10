@@ -26,6 +26,7 @@ public class ChildVerticle extends Verticle {
   @Override
   public void start() throws Exception {
     container.deployVerticle(SubChildVerticle.class.getName());
+    System.out.println("in child verticle start");
   }
 
   @Override

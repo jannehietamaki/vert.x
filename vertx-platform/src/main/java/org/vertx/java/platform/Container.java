@@ -19,14 +19,12 @@ package org.vertx.java.platform;
 import org.vertx.java.core.Handler;
 import org.vertx.java.core.json.JsonObject;
 import org.vertx.java.core.logging.Logger;
-import org.vertx.java.platform.impl.VerticleManager;
+import org.vertx.java.platform.impl.PlatformManagerInternal;
 
-import java.io.File;
-import java.net.URL;
 import java.util.Map;
 
 /**
- * This class represents the container in which a verticle runs.<p>
+ * This class represents the verticle's view of the container.<p>
  * An instance of this class will be created by the system and made available to
  * a running Verticle.
  * It contains methods to programmatically deploy other verticles, undeploy
@@ -37,9 +35,9 @@ import java.util.Map;
  */
 public class Container {
 
-  private final VerticleManager mgr;
+  private final PlatformManagerInternal mgr;
 
-  public Container(final VerticleManager mgr) {
+  public Container(final PlatformManagerInternal mgr) {
     this.mgr = mgr;
   }
 
@@ -76,7 +74,18 @@ public class Container {
    * @param instances The number of instances to deploy (defaults to 1)
    */
   public void deployWorkerVerticle(String main, JsonObject config, int instances) {
-    deployWorkerVerticle(main, config, instances, null);
+    deployWorkerVerticle(main, config, instances, false, null);
+  }
+
+  /**
+   * Deploy a worker verticle programmatically
+   * @param main The main of the verticle
+   * @param config JSON config to provide to the verticle
+   * @param instances The number of instances to deploy (defaults to 1)
+   * @param multiThreaded if true then the verticle will be deployed as a multi-threaded worker
+   */
+  public void deployWorkerVerticle(String main, JsonObject config, int instances, boolean multiThreaded) {
+    deployWorkerVerticle(main, config, instances, multiThreaded, null);
   }
 
   /**
@@ -86,10 +95,8 @@ public class Container {
    * @param instances The number of instances to deploy (defaults to 1)
    * @param doneHandler The handler will be called passing in the unique deployment id when  deployment is complete
    */
-  public void deployWorkerVerticle(String main, JsonObject config, int instances, Handler<String> doneHandler) {
-    URL[] currURLs = mgr.getDeploymentURLs();
-    File modDir = mgr.getDeploymentModDir();
-    mgr.deployVerticle(true, main, config, currURLs, instances, modDir, null, doneHandler);
+  public void deployWorkerVerticle(String main, JsonObject config, int instances, boolean multiThreaded, Handler<String> doneHandler) {
+    mgr.deployWorkerVerticle(multiThreaded, main, config, null, instances, null, doneHandler);
   }
 
   /**
@@ -136,8 +143,7 @@ public class Container {
    * @param doneHandler The handler will be called passing in the unique deployment id when  deployment is complete
    */
   public void deployModule(String moduleName, JsonObject config, int instances, Handler<String> doneHandler) {
-    File modDir = mgr.getDeploymentModDir();
-    mgr.deployMod(moduleName, config, instances, modDir, doneHandler);
+    mgr.deployModule(moduleName, config, instances, doneHandler);
   }
 
   /**
@@ -184,9 +190,26 @@ public class Container {
    * @param doneHandler The handler will be called passing in the unique deployment id when  deployment is complete
    */
   public void deployVerticle(String main, JsonObject config, int instances, Handler<String> doneHandler) {
-    URL[] currURLs = mgr.getDeploymentURLs();
-    File modDir = mgr.getDeploymentModDir();
-    mgr.deployVerticle(false, main, config, currURLs, instances, modDir, null, doneHandler);
+    mgr.deployVerticle(main, config, null, instances, null, doneHandler);
+  }
+
+  /**
+   * Deploy a verticle programmatically
+   * @param main The main of the verticle
+   * @param doneHandler The handler will be called passing in the unique deployment id when  deployment is complete
+   */
+  public void deployVerticle(String main, Handler<String> doneHandler) {
+    this.deployVerticle(main, null, 1, doneHandler);
+  }
+
+  /**
+   * Deploy a verticle programmatically
+   * @param main The main of the verticle
+   * @param config JSON config to provide to the verticle
+   * @param doneHandler The handler will be called passing in the unique deployment id when  deployment is complete
+   */
+  public void deployVerticle(String main, JsonObject config, Handler<String> doneHandler) {
+    this.deployVerticle(main, config, 1, doneHandler);
   }
 
   /**
@@ -243,7 +266,7 @@ public class Container {
    * Cause the container to exit
    */
   public void exit() {
-    mgr.unblock();
+    mgr.exit();
   }
 
   /**

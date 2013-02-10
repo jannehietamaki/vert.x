@@ -19,7 +19,8 @@ import org.jboss.netty.channel.socket.nio.NioClientBossPool;
 import org.jboss.netty.channel.socket.nio.NioServerBossPool;
 import org.jboss.netty.channel.socket.nio.NioWorkerPool;
 
-import java.util.concurrent.*;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 
 /**
@@ -45,6 +46,7 @@ public class VertxExecutorFactory {
     return new NioWorkerPool(exec, corePoolSize);
   }
 
+
   // The worker pool needs to be fixed with a backing queue
   public static ExecutorService workerPool(String poolName) {
     int maxSize = Integer.getInteger("vertx.pool.worker.size", WORKER_POOL_MAX_SIZE);
@@ -59,10 +61,10 @@ public class VertxExecutorFactory {
     return new NioServerBossPool(exec, acceptorPoolSize);
   }
 
-  public static NioClientBossPool clientAcceptorPool(String poolName) {
+  public static NioClientBossPool clientAcceptorPool(VertxInternal vertx, String poolName) {
     int acceptorPoolSize = Integer.getInteger("vertx.pool.acceptor.size", ACCEPTOR_POOL_MAX_SIZE);
     ExecutorService exec = Executors.newFixedThreadPool(acceptorPoolSize, new VertxThreadFactory(poolName));
-    return new NioClientBossPool(exec, acceptorPoolSize);
+    return new NioClientBossPool(exec, acceptorPoolSize, vertx.getTimer(), null);
   }
 
 }

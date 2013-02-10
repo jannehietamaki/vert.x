@@ -18,6 +18,8 @@ package org.vertx.java.tests.deploy;
 
 import org.junit.Test;
 import org.vertx.java.testframework.TestBase;
+import vertx.tests.deploy.AsyncStartClient;
+import vertx.tests.deploy.MultiThreadedTestClient;
 import vertx.tests.deploy.TestClient;
 
 /**
@@ -37,12 +39,39 @@ public class JavaDeployTest extends TestBase {
   }
 
   @Test
-  public void testDeploy() throws Exception {
+  public void testDeployVerticle() throws Exception {
     startTest(getMethodName());
   }
 
   @Test
-  public void testUndeploy() throws Exception {
+  public void testUndeployVerticle() throws Exception {
+    startTest(getMethodName());
+  }
+
+  @Test
+  public void testDeployModule() throws Exception {
+    startTest(getMethodName());
+  }
+
+  @Test
+  public void testUndeployModule() throws Exception {
+    startTest(getMethodName());
+  }
+
+  @Test
+  public void testDeployNestedModule() throws Exception {
+    startTest(getMethodName());
+  }
+
+  @Test
+  public void testStarted() throws Exception {
+    startApp(AsyncStartClient.class.getName());
+    startTest(getMethodName());
+  }
+
+  @Test
+  public void testMultiThreaded() throws Exception {
+    startApp(MultiThreadedTestClient.class.getName());
     startTest(getMethodName());
   }
 

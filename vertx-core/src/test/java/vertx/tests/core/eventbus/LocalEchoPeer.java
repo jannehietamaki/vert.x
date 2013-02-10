@@ -145,7 +145,7 @@ public class LocalEchoPeer extends EventBusAppBase {
           boolean handled = false;
 
           public void handle(Message msg) {
-            tu.checkContext();
+            tu.checkThread();
             tu.azzert(!handled);
             eb.unregisterHandler(LocalEchoClient.ECHO_ADDRESS, this);
             handled = true;
@@ -153,7 +153,7 @@ public class LocalEchoPeer extends EventBusAppBase {
           }
         }, new AsyncResultHandler<Void>() {
       public void handle(AsyncResult<Void> event) {
-        if (event.exception == null) {
+        if (event.succeeded()) {
           tu.testComplete();
         } else {
           tu.azzert(false, "Failed to register");

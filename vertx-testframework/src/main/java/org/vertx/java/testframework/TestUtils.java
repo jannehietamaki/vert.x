@@ -21,8 +21,6 @@ import org.vertx.java.core.SimpleHandler;
 import org.vertx.java.core.Vertx;
 import org.vertx.java.core.buffer.Buffer;
 import org.vertx.java.core.eventbus.Message;
-import org.vertx.java.core.impl.Context;
-import org.vertx.java.core.impl.VertxInternal;
 import org.vertx.java.core.json.JsonObject;
 import org.vertx.java.core.logging.Logger;
 import org.vertx.java.core.logging.impl.LoggerFactory;
@@ -42,15 +40,13 @@ public class TestUtils {
 
   private static final Logger log = LoggerFactory.getLogger(TestUtils.class);
 
-  private final VertxInternal vertx;
+  private final Vertx vertx;
   private final Thread th;
-  private final Context context;
   private Map<String, Handler<Message<JsonObject>>> handlers = new HashMap<>();
 
   public TestUtils(final Vertx vertx) {
-  	this.vertx = (VertxInternal) Args.notNull(vertx, "vertx");
+  	this.vertx = Args.notNull(vertx, "vertx");
     this.th = Thread.currentThread();
-    this.context = this.vertx.getContext();
   }
 
   public void azzert(boolean result) {
@@ -144,6 +140,7 @@ public class TestUtils {
   }
 
   private void sendMessage(JsonObject msg) {
+    EventLog.addEvent("Sending message: " + msg.encode());
     try {
       vertx.eventBus().publish(TestBase.EVENTS_ADDRESS, msg);
     } catch (Exception e) {
@@ -228,12 +225,8 @@ public class TestUtils {
     return true;
   }
 
-  public void checkContext() {
-    if (context == null) {
-      throw new IllegalStateException("Don't call checkContext if utils were created with a null context");
-    }
+  public void checkThread() {
     azzert(th == Thread.currentThread(), "Expected:" + th + " Actual:" + Thread.currentThread());
-    azzert(context.equals(vertx.getContext()), "Expected:" + context + " Actual:" + vertx.getContext());
   }
 
 }

@@ -26,7 +26,6 @@ import org.vertx.java.core.net.impl.DefaultNetServer;
 import org.vertx.java.core.net.impl.ServerID;
 
 import java.util.Map;
-import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 
 /**
@@ -46,7 +45,7 @@ public abstract class VertxInternal extends Vertx {
 
   public abstract Context startOnEventLoop(Runnable runnable);
 
-  public abstract Context startInBackground(Runnable runnable);
+  public abstract Context startInBackground(Runnable runnable, boolean multiThreaded);
 
   public abstract Context getOrAssignContext();
 

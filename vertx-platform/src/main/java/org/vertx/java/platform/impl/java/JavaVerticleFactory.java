@@ -20,9 +20,7 @@ import org.vertx.java.core.Vertx;
 import org.vertx.java.core.logging.Logger;
 import org.vertx.java.platform.Container;
 import org.vertx.java.platform.Verticle;
-import org.vertx.java.platform.impl.ModuleClassLoader;
 import org.vertx.java.platform.VerticleFactory;
-import org.vertx.java.platform.impl.VerticleManager;
 
 /**
  * @author <a href="http://tfox.org">Tim Fox</a>
@@ -57,7 +55,6 @@ public class JavaVerticleFactory implements VerticleFactory {
     } else {
       clazz = cl.loadClass(className);
     }
-
     return (Verticle)clazz.newInstance();
   }
     
