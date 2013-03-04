@@ -1,4 +1,5 @@
-package org.vertx.java.core.impl;/*
+package org.vertx.java.core.impl;
+/*
  * Copyright 2013 Red Hat, Inc.
  *
  * Red Hat licenses this file to you under the Apache License, version 2.0
@@ -16,6 +17,8 @@ package org.vertx.java.core.impl;/*
  * @author <a href="http://tfox.org">Tim Fox</a>
  */
 
+import org.jboss.netty.channel.socket.nio.NioWorker;
+
 import java.util.concurrent.Executor;
 
 public class MultiThreadedWorkerContext extends Context {
@@ -28,9 +31,10 @@ public class MultiThreadedWorkerContext extends Context {
   }
 
   public void execute(Runnable task) {
-    final Runnable wrapped = wrapTask(task);
-    if (wrapped != null) {
-      bgExec.execute(wrapped);
-    }
+    bgExec.execute(wrapTask(task));
+  }
+
+  public boolean isOnCorrectWorker(NioWorker worker) {
+    return false;
   }
 }

@@ -25,14 +25,20 @@ import org.vertx.java.core.logging.impl.LoggerFactory;
 import org.vertx.java.platform.PlatformLocator;
 import org.vertx.java.platform.PlatformManager;
 import org.vertx.java.platform.impl.Args;
+import org.vertx.java.platform.impl.ModuleClassLoader;
+import org.vertx.java.platform.impl.resolver.HttpResolution;
 
 import java.io.File;
 import java.io.FileNotFoundException;
+import java.io.IOException;
+import java.io.InputStream;
 import java.net.*;
 import java.util.Enumeration;
 import java.util.Scanner;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.jar.Attributes;
+import java.util.jar.Manifest;
 
 /**
  *
@@ -44,13 +50,15 @@ public class Starter {
 
   private static final String CP_SEPARATOR = System.getProperty("path.separator");
 
-  private static final String VERSION = "vert.x-1.3.1.final";
-
   public static void main(String[] args) {
+    // Show download stats - they don't display properly in Gradle so we only have them when running
+    // on the command line
+    HttpResolution.suppressDownloadCounter = false;
+    ModuleClassLoader.reverseLoadOrder = false;
     new Starter(args);
   }
 
-  private CountDownLatch stopLatch = new CountDownLatch(1);
+  private final CountDownLatch stopLatch = new CountDownLatch(1);
 
   private Starter(String[] sargs) {
     if (sargs.length < 1) {
@@ -59,21 +67,21 @@ public class Starter {
       String command = sargs[0].toLowerCase();
       Args args = new Args(sargs);
       if ("version".equals(command)) {
-        log.info(VERSION);
+        log.info(getVersion());
       } else {
         if (sargs.length < 2) {
           displaySyntax();
         } else {
           String operand = sargs[1];
           switch (command) {
-            case "version":
-              log.info(VERSION);
-              break;
             case "run":
-              runVerticle(false, operand, args);
+              runVerticle(false, false, operand, args);
               break;
             case "runmod":
-              runVerticle(true, operand, args);
+              runVerticle(false, true, operand, args);
+              break;
+            case "runzip":
+              runVerticle(true, true, operand, args);
               break;
             case "install":
               installModule(operand);
@@ -124,7 +132,7 @@ public class Starter {
     });
   }
 
-  private void runVerticle(boolean module, String main, Args args) {
+  private void runVerticle(boolean zip, boolean module, String main, Args args) {
     boolean clustered = args.map.get("-cluster") != null;
     PlatformManager mgr;
     if (clustered) {
@@ -146,33 +154,6 @@ public class Starter {
       mgr = createPM(clusterPort, clusterHost);
     } else {
       mgr = createPM();
-    }
-
-    boolean worker = args.map.get("-worker") != null;
-
-    String cp = args.map.get("-cp");
-    if (cp == null) {
-      cp = ".";
-    }
-
-    // Convert to URL[]
-
-    String[] parts;
-
-    if (cp.contains(CP_SEPARATOR)) {
-      parts = cp.split(CP_SEPARATOR);
-    } else {
-      parts = new String[] { cp };
-    }
-    int index = 0;
-    final URL[] urls = new URL[parts.length];
-    for (String part: parts) {
-      try {
-        URL url = new File(part).toURI().toURL();
-        urls[index++] = url;
-      } catch (MalformedURLException e) {
-        throw new IllegalArgumentException("Invalid path " + part + " in cp " + cp) ;
-      }
     }
 
     String sinstances = args.map.get("-instances");
@@ -222,9 +203,37 @@ public class Starter {
         }
       }
     };
-    if (module) {
+    if (zip) {
+      mgr.deployModuleFromZip(main, conf, instances, doneHandler);
+    } else if (module) {
       mgr.deployModule(main, conf, instances, doneHandler);
     } else {
+      boolean worker = args.map.get("-worker") != null;
+
+      String cp = args.map.get("-cp");
+      if (cp == null) {
+        cp = ".";
+      }
+
+      // Convert to URL[]
+
+      String[] parts;
+
+      if (cp.contains(CP_SEPARATOR)) {
+        parts = cp.split(CP_SEPARATOR);
+      } else {
+        parts = new String[] { cp };
+      }
+      int index = 0;
+      final URL[] urls = new URL[parts.length];
+      for (String part: parts) {
+        try {
+          URL url = new File(part).toURI().toURL();
+          urls[index++] = url;
+        } catch (MalformedURLException e) {
+          throw new IllegalArgumentException("Invalid path " + part + " in cp " + cp) ;
+        }
+      }
       String includes = args.map.get("-includes");
       if (worker) {
         mgr.deployWorkerVerticle(false, main, conf, urls, instances, includes, doneHandler);
@@ -303,6 +312,24 @@ public class Starter {
     return null;
   }
 
+  public final String getVersion() {
+    String className = getClass().getSimpleName() + ".class";
+    String classPath = getClass().getResource(className).toString();
+    if (!classPath.startsWith("jar")) {
+      // Class not from JAR
+      return "<unknown> (not a jar)";
+    }
+    String manifestPath = classPath.substring(0, classPath.lastIndexOf("!") + 1) + "/META-INF/MANIFEST.MF";
+    Manifest manifest;
+    try (InputStream is = new URL(manifestPath).openStream()) {
+      manifest = new Manifest(is);
+    } catch (IOException ex) {
+      return "<unknown> (" + ex.getMessage() + ")";
+    }
+    Attributes attr = manifest.getMainAttributes();
+    return attr.getValue("Vertx-Version");
+  }
+
   private void displaySyntax() {
 
     String usage =
@@ -339,7 +366,7 @@ public class Starter {
 "    vertx runmod <modname> [-options]                                          \n" +
 "        runs a module called <modname> in its own instance of vert.x.          \n" +
 "        If the module is not already installed, Vert.x will attempt to install \n" +
-"        it from the repository before running it.                            \n\n" +
+"        it from a repository before running it.                            \n\n" +
 "    valid options are:                                                         \n" +
 "        -conf <config_file>    Specifies configuration that should be provided \n" +
 "                               to the module. <config_file> should reference   \n" +
@@ -347,8 +374,6 @@ public class Starter {
 "                               which represents the configuration.             \n" +
 "        -instances <instances> specifies how many instances of the verticle    \n" +
 "                               will be deployed. Defaults to 1                 \n" +
-"        -repo <repo_host>      specifies the repository to use to get the      \n" +
-"                               module from if it is not already installed.     \n" +
 "                               Default is vert-x.github.com/vertx-mods         \n" +
 "        -cluster               if specified then the vert.x instance will form \n" +
 "                               a cluster with any other vert.x instances on    \n" +
@@ -359,16 +384,20 @@ public class Starter {
 "                               If this is not specified vert.x will attempt    \n" +
 "                               to choose one from the available interfaces.  \n\n" +
 
+"    vertx runzip <zipfilename> [-options]                                      \n" +
+"        installs then deploys a module which is contained in the zip specified \n" +
+"        by <zipfilename>. The module will be installed with a name given by    \n" +
+"        <zipfilename> without the .zip extension. If a module with that name   \n" +
+"        is already installed this will do nothing.                             \n" +
+"        The options accepted by this command are exactly the same as those     \n" +
+"        accepted by vertx runmod                                             \n\n" +
+
 "    vertx install <modname> [-options]                                         \n" +
 "        attempts to install a module from a remote repository.                 \n" +
 "        Module will be installed into a local 'mods' directory or, if the      \n" +
 "        module is marked as a system module, the sys-mods directory in the     \n" +
 "        Vert.x installation unless the                                         \n" +
 "        environment variable VERTX_MODS specifies a different location.      \n\n" +
-"    valid options are:\n" +
-"        -repo <repo_host>      specifies the repository to use to get the      \n" +
-"                               module from if it is not already installed.     \n" +
-"                               Default is vert-x.github.com/vertx-mods       \n\n" +
 
 "    vertx uninstall <modname>                                                  \n" +
 "        attempts to uninstall a module from a remote repository.               \n" +

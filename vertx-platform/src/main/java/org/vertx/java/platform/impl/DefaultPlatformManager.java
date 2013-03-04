@@ -18,11 +18,7 @@ package org.vertx.java.platform.impl;
 
 
 import org.vertx.java.core.*;
-import org.vertx.java.core.buffer.Buffer;
-import org.vertx.java.core.impl.BlockingAction;
-import org.vertx.java.core.impl.Context;
-import org.vertx.java.core.impl.DefaultVertx;
-import org.vertx.java.core.impl.VertxInternal;
+import org.vertx.java.core.impl.*;
 import org.vertx.java.core.json.DecodeException;
 import org.vertx.java.core.json.JsonObject;
 import org.vertx.java.core.logging.Logger;
@@ -30,9 +26,7 @@ import org.vertx.java.core.logging.impl.LoggerFactory;
 import org.vertx.java.platform.Container;
 import org.vertx.java.platform.Verticle;
 import org.vertx.java.platform.VerticleFactory;
-import org.vertx.java.platform.impl.resolver.MavenRepoResolver;
-import org.vertx.java.platform.impl.resolver.RepoResolver;
-import org.vertx.java.platform.impl.resolver.Vertx1xResolver;
+import org.vertx.java.platform.impl.resolver.*;
 
 import java.io.*;
 import java.net.MalformedURLException;
@@ -45,6 +39,7 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
@@ -59,8 +54,6 @@ public class DefaultPlatformManager implements PlatformManagerInternal, ModuleRe
 
   private static final Logger log = LoggerFactory.getLogger(DefaultPlatformManager.class);
   private static final int BUFFER_SIZE = 4096;
-  private static final String HTTP_PROXY_HOST_PROP_NAME = "http.proxyHost";
-  private static final String HTTP_PROXY_PORT_PROP_NAME = "http.proxyPort";
   private static final String MODS_DIR_PROP_NAME = "vertx.mods";
   private static final char COLON = ':';
   private static final String LANG_IMPLS_SYS_PROP_ROOT = "vertx.langs.";
@@ -78,15 +71,14 @@ public class DefaultPlatformManager implements PlatformManagerInternal, ModuleRe
   // The user mods dir
   private final File modRoot;
   private final File systemModRoot;
-  private final String proxyHost;
-  private final int proxyPort;
   private final ConcurrentMap<String, ModuleReference> modules = new ConcurrentHashMap<>();
   private final Redeployer redeployer;
   private Map<String, LanguageImplInfo> languageImpls = new ConcurrentHashMap<>();
   private Map<String, String> extensionMappings = new ConcurrentHashMap<>();
   private String defaultLanguageImplName;
-  private List<RepoResolver> defaultRepos = new ArrayList<>();
+  private Map<String, List<RepoResolver>> defaultRepos = new HashMap<>();
   private Handler<Void> exitHandler;
+  private final ClassLoader platformClassLoader;
 
   DefaultPlatformManager() {
     this(new DefaultVertx());
@@ -101,10 +93,8 @@ public class DefaultPlatformManager implements PlatformManagerInternal, ModuleRe
   }
 
   private DefaultPlatformManager(VertxInternal vertx) {
+    this.platformClassLoader = Thread.currentThread().getContextClassLoader();
     this.vertx = vertx;
-    this.proxyHost = System.getProperty(HTTP_PROXY_HOST_PROP_NAME);
-    String tmpPort = System.getProperty(HTTP_PROXY_PORT_PROP_NAME);
-    this.proxyPort = tmpPort != null ? Integer.parseInt(tmpPort) : 80;
     String modDir = System.getProperty(MODS_DIR_PROP_NAME);
     if (modDir != null && !modDir.trim().equals("")) {
       modRoot = new File(modDir);
@@ -120,7 +110,7 @@ public class DefaultPlatformManager implements PlatformManagerInternal, ModuleRe
     }
     this.redeployer = new Redeployer(vertx, modRoot, this);
     loadLanguageMappings();
-    loadDefaultRepos();
+    loadRepos();
   }
 
 
@@ -133,6 +123,9 @@ public class DefaultPlatformManager implements PlatformManagerInternal, ModuleRe
                              int instances,
                              String includes,
                              Handler<String> doneHandler) {
+    if (main == null) {
+      throw new NullPointerException("main cannot be null");
+    }
     deployVerticle(false, false, main, config, classpath, instances, includes, doneHandler);
   }
 
@@ -208,13 +201,11 @@ public class DefaultPlatformManager implements PlatformManagerInternal, ModuleRe
 
   public void installModule(final String moduleName) {
     final CountDownLatch latch = new CountDownLatch(1);
+    final AtomicReference<Exception> result = new AtomicReference<>();
     AsyncResultHandler<Void> handler = new AsyncResultHandler<Void>() {
       public void handle(AsyncResult<Void> res) {
-        if (res.succeeded()) {
-          latch.countDown();
-        } else {
-          log.error("Failed to install", res.exception);
-        }
+        result.set(res.exception);
+        latch.countDown();
       }
     };
 
@@ -230,12 +221,16 @@ public class DefaultPlatformManager implements PlatformManagerInternal, ModuleRe
 
     while (true) {
       try {
-        if (!latch.await(30, TimeUnit.SECONDS)) {
+        if (!latch.await(300, TimeUnit.SECONDS)) {
           throw new IllegalStateException("Timed out waiting to install module");
         }
         break;
       } catch (InterruptedException ignore) {
       }
+    }
+    Exception e = result.get();
+    if (e != null) {
+      log.error("Failed to install module", e);
     }
   }
 
@@ -277,6 +272,16 @@ public class DefaultPlatformManager implements PlatformManagerInternal, ModuleRe
 
   public Vertx getVertx() {
     return this.vertx;
+  }
+
+  public void deployModuleFromZip(String zipFileName, JsonObject config,
+                                  int instances, Handler<String> doneHandler) {
+    final String modName = zipFileName.substring(0, zipFileName.length() - 4);
+    if (unzipModule(modName, new ModuleZipInfo(false, zipFileName), false)) {
+      deployModule(modName, config, instances, doneHandler);
+    } else {
+      doneHandler.handle(null);
+    }
   }
 
   public void exit() {
@@ -361,25 +366,17 @@ public class DefaultPlatformManager implements PlatformManagerInternal, ModuleRe
       for (String modName: mods) {
         File internalModDir = new File(internalModsDir, modName);
         if (!internalModDir.exists()) {
-          boolean installed = false;
-          for (RepoResolver resolver: defaultRepos) {
-            Buffer modZipped = resolver.getModule(modName);
-            if (modZipped != null) {
-              if (!unzipModuleData(modName, internalModsDir, modZipped)) {
-                return false;
-              } else {
-                installed = true;
-                break;
-              }
+          ModuleZipInfo zipInfo = getModule(modName);
+          if (zipInfo.filename != null) {
+            internalModDir.mkdir();
+            if (!unzipModuleData(internalModDir, zipInfo, true)) {
+              return false;
+            } else {
+              log.info("Module " + modName + " successfully installed in mods dir of " + modName);
+              // Now recurse so we bring in all of the deps
+              doPullInDependencies(internalModsDir, modName);
             }
           }
-          if (!installed) {
-            log.error("Failed to find module " + modName + " in any repositories");
-            return false;
-          }
-          log.info("Module " + modName + " successfully installed in mods dir of " + modName);
-          // Now recurse so we bring in all of the deps
-          doPullInDependencies(internalModsDir, modName);
         }
       }
     }
@@ -461,7 +458,7 @@ public class DefaultPlatformManager implements PlatformManagerInternal, ModuleRe
 
     ModuleReference mr = modules.get(moduleKey);
     if (mr == null) {
-      mr = new ModuleReference(this, moduleKey, new ModuleClassLoader(urls), false);
+      mr = new ModuleReference(this, moduleKey, new ModuleClassLoader(platformClassLoader, urls), false);
       ModuleReference prev = modules.putIfAbsent(moduleKey, mr);
       if (prev != null) {
         mr = prev;
@@ -554,7 +551,7 @@ public class DefaultPlatformManager implements PlatformManagerInternal, ModuleRe
       } else {
         // value is made up of an optional module name followed by colon followed by the
         // FQCN of the factory
-        int colonIndex = propVal.indexOf(COLON);
+        int colonIndex = propVal.lastIndexOf(COLON);
         String moduleName;
         String factoryName;
         if (colonIndex != -1) {
@@ -626,7 +623,8 @@ public class DefaultPlatformManager implements PlatformManagerInternal, ModuleRe
       ModuleReference mr = modules.get(modName);
       if (mr == null) {
         boolean res = fields.isResident();
-        mr = new ModuleReference(this, modName, new ModuleClassLoader(urls.toArray(new URL[urls.size()])), res);
+        mr = new ModuleReference(this, modName,
+                                 new ModuleClassLoader(platformClassLoader, urls.toArray(new URL[urls.size()])), res);
         ModuleReference prev = modules.putIfAbsent(modName, mr);
         if (prev != null) {
           mr = prev;
@@ -671,24 +669,16 @@ public class DefaultPlatformManager implements PlatformManagerInternal, ModuleRe
   }
 
   private JsonObject loadModuleConfig(String modName, File modDir) {
-    // It's not clear to me whether the try-with-resources construct will 
-    // close this correctly, the IDE complains about a resource leak. - Pid
-    try (Scanner scanner = new Scanner(new File(modDir, "mod.json")).useDelimiter("\\A")) {
-      String conf;
-      try {
-        conf = scanner.next();
-      } catch (NoSuchElementException e) {
-        throw new IllegalStateException("Module " + modName + " contains an empty mod.json file");
-      }
-      JsonObject json;
-      try {
-        json = new JsonObject(conf);
-      } catch (DecodeException e) {
-        throw new IllegalStateException("Module " + modName + " mod.json contains invalid json");
-      }
-      return json;
+    // Checked the byte code produced, .close() is called correctly, so the warning can be suppressed
+    try (@SuppressWarnings("resource") Scanner scanner = new Scanner(new File(modDir, "mod.json")).useDelimiter("\\A")) {
+      String conf = scanner.next();
+      return new JsonObject(conf);
     } catch (FileNotFoundException e) {
       throw new IllegalStateException("Module " + modName + " does not contain a mod.json file");
+    } catch (NoSuchElementException e) {
+      throw new IllegalStateException("Module " + modName + " contains an empty mod.json file");
+    } catch (DecodeException e) {
+      throw new IllegalStateException("Module " + modName + " mod.json contains invalid json");
     }
   }
 
@@ -709,7 +699,8 @@ public class DefaultPlatformManager implements PlatformManagerInternal, ModuleRe
         ModuleFields fields = new ModuleFields(conf);
 
         boolean res = fields.isResident();
-        includedMr = new ModuleReference(this, moduleName, new ModuleClassLoader(urls.toArray(new URL[urls.size()])),
+        includedMr = new ModuleReference(this, moduleName,
+                                         new ModuleClassLoader(platformClassLoader, urls.toArray(new URL[urls.size()])),
                                          res);
         ModuleReference prev = modules.putIfAbsent(moduleName, includedMr);
         if (prev != null) {
@@ -762,7 +753,7 @@ public class DefaultPlatformManager implements PlatformManagerInternal, ModuleRe
     return arr;
   }
 
-  private void loadDefaultRepos() {
+  private void loadRepos() {
     try (InputStream is = getClass().getClassLoader().getResourceAsStream(REPOS_FILE_NAME)) {
       if (is != null) {
         BufferedReader rdr = new BufferedReader(new InputStreamReader(is));
@@ -781,16 +772,28 @@ public class DefaultPlatformManager implements PlatformManagerInternal, ModuleRe
           String repoID = line.substring(colonPos + 1);
           RepoResolver resolver;
           switch (type) {
-            case "maven":
-              resolver = new MavenRepoResolver(vertx, proxyHost, proxyPort, repoID);
+            case "mavenLocal":
+              resolver = new MavenLocalRepoResolver(repoID);
+              type = "maven";
               break;
-            case "vert.x-1.x":
-              resolver = new Vertx1xResolver(vertx, proxyHost, proxyPort, repoID);
+            case "maven":
+              resolver = new MavenRepoResolver(vertx, repoID);
+              break;
+            case "bintray":
+              resolver = new BintrayRepoResolver(vertx, repoID);
+              break;
+            case "old":
+              resolver = new OldRepoResolver(vertx, repoID);
               break;
             default:
               throw new IllegalArgumentException("Unknown repo type: " + type);
           }
-          defaultRepos.add(resolver);
+          List<RepoResolver> resolvers = defaultRepos.get(type);
+          if (resolvers == null) {
+            resolvers = new ArrayList<>();
+            defaultRepos.put(type, resolvers);
+          }
+          resolvers.add(resolver);
         }
       }
     } catch (IOException e) {
@@ -804,34 +807,84 @@ public class DefaultPlatformManager implements PlatformManagerInternal, ModuleRe
       log.warn("No repositories configured!");
       return false;
     }
-    for (RepoResolver resolver: defaultRepos) {
-      Buffer modZipped = resolver.getModule(moduleName);
-      if (modZipped != null) {
-        return unzipModule(moduleName, modZipped);
-      }
+    if (locateModule(null, moduleName) != null) {
+      log.error("Module is already installed");
+      return false;
     }
-    log.error("Module " + moduleName + "not found in any repositories");
+    ModuleZipInfo info = getModule(moduleName);
+    if (info != null) {
+      return unzipModule(moduleName, info, true);
+    }
     return false;
   }
 
-  private boolean unzipModule(final String modName, final Buffer data) {
-    checkWorkerContext();
+  private ModuleZipInfo getModule(String moduleName) {
+    int colonPos = moduleName.indexOf(COLON);
+    if (colonPos == moduleName.length() - 1) {
+      throw new IllegalArgumentException("Invalid module name, no name after prefix. " + moduleName);
+    }
+    String prefix;
+    if (colonPos == -1) {
+      // Default to old Vert.x 1.x repo
+      prefix = "old";
+    } else {
+      prefix = moduleName.substring(0, colonPos);
+    }
+    String rest = moduleName.substring(colonPos + 1);
+    List<RepoResolver> resolvers = defaultRepos.get(prefix);
+    if (resolvers == null) {
+      throw new IllegalArgumentException("No resolvers for prefix: " + prefix);
+    }
+    String fileName = generateTmpFileName() + ".zip";
+    for (RepoResolver resolver: resolvers) {
+      if (resolver.getModule(fileName, rest)) {
+        return new ModuleZipInfo(resolver.isOldStyle(), fileName);
+      }
+    }
+    log.error("Module " + moduleName + " not found in any repositories");
+    return null;
+  }
 
+  private String generateTmpFileName() {
+    return TEMP_DIR + FILE_SEP + "vertx-" + UUID.randomUUID().toString();
+  }
+
+  private File unzipIntoTmpDir(ModuleZipInfo zipInfo, boolean deleteZip) {
+    String tdir = generateTmpFileName();
+    File tdest = new File(tdir);
+    tdest.mkdir();
+
+    if (!unzipModuleData(tdest, zipInfo, deleteZip)) {
+      return null;
+    } else {
+      return tdest;
+    }
+  }
+
+  private boolean checkModDirs() {
+    if (!modRoot.exists()) {
+      if (!modRoot.mkdir()) {
+        log.error("Failed to create mods dir " + modRoot);
+        return false;
+      }
+    }
+    if (!systemModRoot.exists()) {
+      if (!systemModRoot.mkdir()) {
+        log.error("Failed to create sys mods dir " + modRoot);
+        return false;
+      }
+    }
+    return true;
+  }
+
+
+  private boolean unzipModule(final String modName, final ModuleZipInfo zipInfo, boolean deleteZip) {
     // We synchronize to prevent a race whereby it tries to unzip the same module at the
     // same time (e.g. deployModule for the same module name has been called in parallel)
     synchronized (modName.intern()) {
 
-      if (!modRoot.exists()) {
-        if (!modRoot.mkdir()) {
-          log.error("Failed to create mods dir " + modRoot);
-          return false;
-        }
-      }
-      if (!systemModRoot.exists()) {
-        if (!systemModRoot.mkdir()) {
-          log.error("Failed to create sys mods dir " + modRoot);
-          return false;
-        }
+      if (!checkModDirs()) {
+        return false;
       }
 
       File fdest = new File(modRoot, modName);
@@ -840,63 +893,67 @@ public class DefaultPlatformManager implements PlatformManagerInternal, ModuleRe
         // This can happen if the same module is requested to be installed
         // at around the same time
         // It's ok if this happens
+        log.warn("Module " + modName + " is already installed");
         return true;
       }
 
       // Unzip into temp dir first
-      String tdir = TEMP_DIR + FILE_SEP + "vertx-" + UUID.randomUUID().toString();
-      File tdest = new File(tdir);
-      tdest.mkdir();
-
-      if (!unzipModuleData(modName, tdest, data)) {
+      File tdest = unzipIntoTmpDir(zipInfo, deleteZip);
+      if (tdest == null) {
         return false;
       }
 
       // Check if it's a system module
-      File tmpModDir = new File(tdest, modName);
-      JsonObject conf = loadModuleConfig(modName, tmpModDir);
+      JsonObject conf = loadModuleConfig(modName, tdest);
       ModuleFields fields = new ModuleFields(conf);
 
       boolean system = fields.isSystem();
 
       // Now copy it to the proper directory
-      String moveFrom = tmpModDir.getAbsolutePath();
+      String moveFrom = tdest.getAbsolutePath();
       try {
         vertx.fileSystem().moveSync(moveFrom, system ? sdest.getAbsolutePath() : fdest.getAbsolutePath());
       } catch (Exception e) {
         log.error("Failed to move module", e);
         return false;
       }
+
       log.info("Module " + modName +" successfully installed");
       return true;
     }
   }
 
-  private boolean unzipModuleData(String modName, final File directory, final Buffer data) {
-    try (InputStream is = new ByteArrayInputStream(data.getBytes())) {
-      ZipInputStream zis = new ZipInputStream(new BufferedInputStream(is));
+  private String removeTopDir(String entry) {
+    int pos = entry.indexOf(FILE_SEP);
+    if (pos != -1) {
+      entry = entry.substring(pos + 1);
+    }
+    return entry;
+  }
+
+  private boolean unzipModuleData(final File directory, final ModuleZipInfo zipinfo, boolean deleteZip) {
+    try (InputStream is = new BufferedInputStream(new FileInputStream(zipinfo.filename)); ZipInputStream zis = new ZipInputStream(new BufferedInputStream(is))) {
       ZipEntry entry;
       while ((entry = zis.getNextEntry()) != null) {
-        if (!entry.getName().startsWith(modName)) {
-          log.error("Module must contain zipped directory with same name as module");
-          return false;
-        }
-        if (entry.isDirectory()) {
-          new File(directory, entry.getName()).mkdir();
-        } else {
-          int count;
-          byte[] buff = new byte[BUFFER_SIZE];
-          BufferedOutputStream dest = null;
-          try {
-            OutputStream fos = new FileOutputStream(new File(directory, entry.getName()));
-            dest = new BufferedOutputStream(fos, BUFFER_SIZE);
-            while ((count = zis.read(buff, 0, BUFFER_SIZE)) != -1) {
-              dest.write(buff, 0, count);
-            }
-            dest.flush();
-          } finally {
-            if (dest != null) {
-              dest.close();
+        String entryName = zipinfo.oldStyle ? removeTopDir(entry.getName()) : entry.getName();
+        if (!entryName.isEmpty()) {
+          if (entry.isDirectory()) {
+            new File(directory, entryName).mkdir();
+          } else {
+            int count;
+            byte[] buff = new byte[BUFFER_SIZE];
+            BufferedOutputStream dest = null;
+            try {
+              OutputStream fos = new FileOutputStream(new File(directory, entryName));
+              dest = new BufferedOutputStream(fos, BUFFER_SIZE);
+              while ((count = zis.read(buff, 0, BUFFER_SIZE)) != -1) {
+                dest.write(buff, 0, count);
+              }
+              dest.flush();
+            } finally {
+              if (dest != null) {
+                dest.close();
+              }
             }
           }
         }
@@ -906,6 +963,9 @@ public class DefaultPlatformManager implements PlatformManagerInternal, ModuleRe
       return false;
     } finally {
       directory.delete();
+      if (deleteZip) {
+        new File(zipinfo.filename).delete();
+      }
     }
     return true;
   }
@@ -935,7 +995,7 @@ public class DefaultPlatformManager implements PlatformManagerInternal, ModuleRe
   private void doDeploy(final String depName,
                         boolean autoRedeploy,
                         boolean worker, boolean multiThreaded,
-                        final String main,
+                        String theMain,
                         final String modName,
                         final JsonObject config, final URL[] urls,
                         int instances,
@@ -947,8 +1007,8 @@ public class DefaultPlatformManager implements PlatformManagerInternal, ModuleRe
     final String deploymentName =
         depName != null ? depName : genDepName();
 
-    log.debug("Deploying name : " + deploymentName + " main: " + main +
-        " instances: " + instances);
+    log.debug("Deploying name : " + deploymentName + " main: " + theMain +
+              " instances: " + instances);
 
     // How we determine which language implementation to use:
     // 1. Look for a prefix on the main, e.g. 'groovy:org.foo.myproject.MyGroovyMain' would force the groovy
@@ -959,14 +1019,18 @@ public class DefaultPlatformManager implements PlatformManagerInternal, ModuleRe
 
     LanguageImplInfo langImplInfo = null;
 
+    final String main;
     // Look for a prefix
-    int prefixMarker = main.indexOf(COLON);
+    int prefixMarker = theMain.indexOf(COLON);
     if (prefixMarker != -1) {
-      String prefix = main.substring(0, prefixMarker);
+      String prefix = theMain.substring(0, prefixMarker);
       langImplInfo = languageImpls.get(prefix);
       if (langImplInfo == null) {
         throw new IllegalStateException("No language implementation known for prefix " + prefix);
       }
+      main = theMain.substring(prefixMarker + 1);
+    } else {
+      main = theMain;
     }
     if (langImplInfo == null) {
       // No prefix - now look at the extension
@@ -994,12 +1058,16 @@ public class DefaultPlatformManager implements PlatformManagerInternal, ModuleRe
 
     // Include the language impl module as a parent of the classloader
     if (langImplInfo.moduleName != null) {
-      loadIncludedModules(modDir, mr, langImplInfo.moduleName);
+      if (!loadIncludedModules(modDir, mr, langImplInfo.moduleName)) {
+        log.error("Failed to load module: " + langImplInfo.moduleName);
+        doneHandler.handle(null);
+        return;
+      }
     }
 
     final VerticleFactory verticleFactory;
 
-    final Container container = new Container(this);
+    final Container container = new DefaultContainer(this);
 
     try {
       // TODO not one verticle factory per module ref, but one per language per module ref
@@ -1080,7 +1148,9 @@ public class DefaultPlatformManager implements PlatformManagerInternal, ModuleRe
               if (modDir != null) {
                 setPathAdjustment(modDir);
               }
-              verticle.start(new AsyncResultHandler<Void>() {
+              VoidResult vr = new VoidResult();
+              verticle.start(vr);
+              vr.setHandler(new AsyncResultHandler<Void>() {
                 @Override
                 public void handle(AsyncResult<Void> ar) {
                   if (ar.succeeded()) {
@@ -1165,22 +1235,15 @@ public class DefaultPlatformManager implements PlatformManagerInternal, ModuleRe
         count.incRequired();
         holder.context.execute(new Runnable() {
           public void run() {
-            // The closed handler will be called when there are no more outstanding tasks for the context
-            // Remember that the vertxStop() method might schedule other async operations and they in turn might schedule
-            // others
-            holder.context.closedHandler(new SimpleHandler() {
-              @Override
-              protected void handle() {
-                LoggerFactory.removeLogger(holder.loggerName);
-                holder.context.runCloseHooks();
-                count.complete();
-              }
-            });
             try {
               holder.verticle.stop();
             } catch (Throwable t) {
               vertx.reportException(t);
             }
+            LoggerFactory.removeLogger(holder.loggerName);
+            holder.context.runCloseHooks();
+            holder.context.close();
+            count.complete();
           }
         });
       }
@@ -1253,6 +1316,15 @@ public class DefaultPlatformManager implements PlatformManagerInternal, ModuleRe
     }
   }
 
+  private static final class ModuleZipInfo {
+    final boolean oldStyle;
+    final String filename;
+
+    private ModuleZipInfo(boolean oldStyle, String filename) {
+      this.oldStyle = oldStyle;
+      this.filename = filename;
+    }
+  }
 
 
 }

@@ -1,7 +1,5 @@
 package org.vertx.java.platform.impl.resolver;
 
-import org.vertx.java.core.buffer.Buffer;
-
 /*
  * Copyright 2008-2011 Red Hat, Inc.
  *
@@ -22,6 +20,8 @@ import org.vertx.java.core.buffer.Buffer;
  */
 public interface RepoResolver {
 
-  public Buffer getModule(String moduleName);
+  boolean getModule(String filename, String moduleName);
+
+  boolean isOldStyle();
 
 }

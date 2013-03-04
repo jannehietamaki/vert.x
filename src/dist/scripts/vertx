@@ -13,6 +13,8 @@
 # DEFAULT_JVM_OPTS="-XX:+CMSClassUnloadingEnabled -XX:-UseGCOverheadLimit"
 DEFAULT_JVM_OPTS=""
 
+JMX_OPTS="-Dcom.sun.management.jmxremote -Dvertx.management.jmx=true -Dhazelcast.jmx=true"
+
 APP_NAME="vertx"
 APP_BASE_NAME=`basename "$0"`
 
@@ -69,7 +71,7 @@ cd "`dirname \"$PRG\"`/.."
 VERTX_HOME="`pwd -P`"
 cd "$SAVED"
 
-CLASSPATH=${CLASSPATH}:${VERTX_HOME}/lib/*:${VERTX_HOME}/conf
+CLASSPATH=${CLASSPATH}:${VERTX_HOME}/conf:${VERTX_HOME}/lib/*
 
 # Determine the Java command to use to start the JVM.
 if [ -n "$JAVA_HOME" ] ; then
@@ -166,7 +168,7 @@ fi
 function splitJvmOpts() {
     JVM_OPTS=("$@")
 }
-eval splitJvmOpts $DEFAULT_JVM_OPTS $JAVA_OPTS $VERTX_OPTS
+eval splitJvmOpts $DEFAULT_JVM_OPTS $JAVA_OPTS $JMX_OPTS $VERTX_OPTS
 
 exec "$JAVACMD" \
     "${JVM_OPTS[@]}" \

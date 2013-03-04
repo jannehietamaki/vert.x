@@ -18,8 +18,6 @@ apply from: "$rootDir/gradle/maven.gradle"
 
 dependencies {
 	compile project(':vertx-core')
-  testCompile "junit:junit:$junitVersion"
-  testCompile project(':vertx-testframework')
 }
 
 artifacts {
@@ -29,7 +27,9 @@ artifacts {
 jar {
 	manifest {
 		attributes(
-			'Main-Class': 'org.vertx.java.platform.impl.cli.Starter'
+        'Main-Class': 'org.vertx.java.deploy.impl.cli.Starter',
+        'Implementation-Title': 'Vertx (see http://vertx.io/)',
+        'Vertx-Version': version
 		)
 	}
 }
@@ -37,14 +37,14 @@ jar {
 sourceSets {
   test {
     resources {
-      srcDirs "../src/dist/conf"
+      srcDirs "src/test/resources/testconf"
     }
   }
 }
 
 // Cleanup the modules placed in the mod-test directory during the test suite
 task cleanTestTmpModules(type: Delete) {
-  delete { file("src/test/mod-test").listFiles().find { it.name ==~ /io.vertx.+/ } }
+  delete { file("src/test/mod-test").listFiles().findAll { it.name ==~ /maven:.+/ || it.name ==~ /bintray:.+/} }
 }
 
 clean {
@@ -60,10 +60,22 @@ test {
 
   testLogging.showStandardStreams = true
 
-  systemProperty 'vertx.test.timeout', 15
+  systemProperty 'vertx.test.timeout', 60
   systemProperty 'vertx.mods', "$projectDir/src/test/mod-test"
 
   jvmArgs '-server', '-Xms128m', '-Xmx1024m', '-XX:MaxPermSize=128m', '-XX:NewRatio=2'
 
   testLogging { exceptionFormat "full" }
+}
+
+task collectDeps(type: Copy) {
+  destinationDir = file("build/deps")
+  into("compile") {
+    from configurations.compile
+    exclude "vertx-*.jar"
+  }
+  into("test") {
+    from configurations.testCompile
+    exclude "vertx-*.jar"
+  }
 }

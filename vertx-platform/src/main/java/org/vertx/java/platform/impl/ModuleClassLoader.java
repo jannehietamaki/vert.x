@@ -16,13 +16,11 @@ import java.util.*;
  * A ModuleClassLoader can have multiple parents, this always includes the class loader of the module that deployed it
  * (or null if is a top level module), plus the class loaders of any modules that this module includes.
  *
- * If the class to be loaded is a system class, the system classloader is called directly.
- *
- * Otherwise this class loader always tries to the load the class itself. If it can't find the class it iterates
- * through its parents trying to load the class. If none of the parents can find it, the system classloader is tried.
+ * This class loader always tries to the load the class itself. If it can't find the class it iterates
+ * through its parents trying to load the class. If none of the parents can find it, the platform class loader classloader is tried.
  *
  * When locating resources this class loader always looks for the resources itself, then it asks the parents to look,
- * and finally the system classloader is asked.
+ * and finally the platform class loader classloader is asked.
  *
  * @author <a href="http://tfox.org">Tim Fox</a>
  */
@@ -30,17 +28,22 @@ public class ModuleClassLoader extends URLClassLoader {
 
   private static final Logger log = LoggerFactory.getLogger(ModuleClassLoader.class);
 
+  // When running in an IDE we want to always try and load from the platform classloader first
+  // This allows in-container tests running in the IDE to immediately see changes to any resources in the module
+  // without having to rebuild the module into the mods directory every time
+  public static boolean reverseLoadOrder = true;
+
   // When loading resources or classes we need to catch any circular dependencies
   private static ThreadLocal<Set<ModuleClassLoader>> circDepTL = new ThreadLocal<>();
   // And we need to keep track of the recurse depth so we know when we can remove the thread local
   private static ThreadLocal<Integer> recurseDepth = new ThreadLocal<>();
 
   private final Set<ModuleReference> parents = new ConcurrentHashSet<>();
-  private final ClassLoader system;
+  private final ClassLoader platformClassLoader;
 
-  public ModuleClassLoader(URL[] classpath) {
+  public ModuleClassLoader(ClassLoader platformClassLoader, URL[] classpath) {
     super(classpath);
-    system = getSystemClassLoader();
+    this.platformClassLoader = platformClassLoader;
   }
 
   public void addParent(ModuleReference parent) {
@@ -63,20 +66,19 @@ public class ModuleClassLoader extends URLClassLoader {
       throws ClassNotFoundException {
     Class<?> c = findLoadedClass(name);
     if (c == null) {
-      // If a system class then we always try to load with the system class loader first
-      // In some case, e.g. with some org.vertx classes it won't find it, since some vert.x produced
-      // modules might contain org.vertx.* classes, in which case we continue
-      if (isSystemClass(name)) {
+      if (reverseLoadOrder) {
         try {
-          c = system.loadClass(name);
+          c = platformClassLoader.loadClass(name);
         } catch (ClassNotFoundException e) {
-          // Ok continue
         }
       }
       if (c == null) {
         try {
-          // Now try and load the class with this class loader
+          // First try and load the class with the module classloader
           c = findClass(name);
+          if (resolve) {
+            resolveClass(c);
+          }
         } catch (ClassNotFoundException e) {
           // Not found - maybe the parent class loaders can load it?
           try {
@@ -88,7 +90,8 @@ public class ModuleClassLoader extends URLClassLoader {
               checkAlreadyWalked(walked, parent);
               try {
                 // Try with the parent
-                return parent.mcl.loadClass(name);
+                c = parent.mcl.loadClass(name);
+                break;
               } catch (ClassNotFoundException e1) {
                 // Try the next one
               }
@@ -97,26 +100,18 @@ public class ModuleClassLoader extends URLClassLoader {
             // Make sure we clear the thread locals afterwards
             checkClearTLs();
           }
-          // If we get here then none of the parents could find it, so try the system
-          // It IS valid for vert.x users to add classes on the system classpath, but it is frowned upon.
-          return system.loadClass(name);
+          if (c == null) {
+            if (reverseLoadOrder) {
+              throw e;
+            } else {
+              // If we get here then the module classloaders couldn't load it so we try the platform class loader
+              c = platformClassLoader.loadClass(name);
+            }
+          }
         }
       }
     }
-    if (resolve) {
-      resolveClass(c);
-    }
     return c;
-  }
-
-  /*
-  A system class is any class whose loading should be delegated to the system class loader
-  This includes all JDK classes and all vert.x internal classes. We don't want this stuff to be ever loaded
-  by a module class loader
-   */
-  private boolean isSystemClass(String name) {
-    return (name.startsWith("java.") || name.startsWith("com.sun.") || name.startsWith("javax.") ||
-            name.startsWith("org.vertx."));
   }
 
   private Set<ModuleClassLoader> getWalked() {
@@ -167,8 +162,8 @@ public class ModuleClassLoader extends URLClassLoader {
             return url;
           }
         }
-        // If got here then none of the parents know about it, so try the system
-        url = system.getResource(name);
+        // If got here then none of the parents know about it, so try the platform class loader
+        url = platformClassLoader.getResource(name);
       }
       return url;
     } finally {
@@ -206,8 +201,8 @@ public class ModuleClassLoader extends URLClassLoader {
       checkClearTLs();
     }
 
-    // And system too
-    addURLs(totURLs, system.getResources(name));
+    // And platform class loader too
+    addURLs(totURLs, platformClassLoader.getResources(name));
 
     return new Enumeration<URL>() {
       Iterator<URL> iter = totURLs.iterator();

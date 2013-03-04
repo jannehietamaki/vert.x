@@ -19,25 +19,22 @@ import org.vertx.java.core.Vertx;
  *
  * @author <a href="http://tfox.org">Tim Fox</a>
  *
- * This resolver works with any HTTP server that can serve modules from GETs to Maven style urls
  */
 public class MavenRepoResolver extends HttpRepoResolver {
 
-  public MavenRepoResolver(Vertx vertx, String proxyHost, int proxyPort, String repoID) {
-    super(vertx, proxyHost, proxyPort, repoID);
+  public MavenRepoResolver(Vertx vertx, String repoID) {
+    super(vertx, repoID);
   }
 
   @Override
-  protected String getRepoURI(String moduleName) {
-    ModuleIdentifier mi = new ModuleIdentifier(moduleName);
-    StringBuilder uri = new StringBuilder(contentRoot);
-    uri.append('/');
-    String[] parts = mi.group.split("\\.");
-    for (String part: parts) {
-      uri.append(part).append('/');
-    }
-    uri.append(mi.name).append('/').append(mi.version).append('/').
-        append(mi.name).append('-').append(mi.version).append(".zip");
-    return uri.toString();
+  public boolean getModule(String filename, String moduleName) {
+    HttpResolution res = new MavenResolution(vertx, repoHost, repoPort, moduleName, filename, contentRoot);
+    res.getModule();
+    return res.waitResult();
   }
+
+  public boolean isOldStyle() {
+    return false;
+  }
+
 }

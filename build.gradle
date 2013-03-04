@@ -49,37 +49,25 @@ subprojects {
 
   defaultTasks = ['classes']
   group = rootProject.group
-  
+
   repositories {
+    mavenLocal()
+    maven { url 'https://oss.sonatype.org/content/repositories/snapshots' }
     mavenCentral()
   }
   
   dependencies {
     testCompile "junit:junit:$junitVersion"
+    testCompile "io.vertx:vertx-testframework:$testframeworkversion", {
+      exclude group: "io.vertx"
+      exclude group: "junit"
+    }
+    testCompile project(":vertx-platform")
   }
   
   javadoc {
     destinationDir = file("build/docs/java/api")
   }
-
-  task collectDeps(type: Copy) {
-    destinationDir = file("build/deps")
-    into("compile") {
-      from configurations.compile
-      exclude "vertx-*.jar"
-    }
-    into("test") {
-      from configurations.testCompile
-      exclude "vertx-*.jar"
-    }
-  }
-}
-
-defaultTasks = ['preflight']
-
-task preflight(dependsOn: subprojects.collectDeps) {
-  group = null
-  description = null
 }
 
 task test(dependsOn: [subprojects.test]) {
@@ -97,7 +85,7 @@ task clean(type: Delete, dependsOn: [subprojects.clean]) {
   }
 }
 
-task assemble(type: Copy, dependsOn: ['preflight', subprojects.assemble]) {
+task assemble(type: Copy, dependsOn: [subprojects.assemble]) {
   group = 'vert.x'
   description 'Build the parent and all of the vert.x subprojects'
 
@@ -111,8 +99,9 @@ task assemble(type: Copy, dependsOn: ['preflight', subprojects.assemble]) {
     from file('src/dist/client')
   }
   into('conf') {
-    from file('src/dist/conf')
+    from file('vertx-platform/src/main/resources')
     filter(org.apache.tools.ant.filters.ReplaceTokens, tokens:[version: rootProject.version])
+    exclude "**/META_INF/**"
   }
   into('examples') {
     from file("vertx-examples/src/main")
@@ -149,8 +138,8 @@ task assemble(type: Copy, dependsOn: ['preflight', subprojects.assemble]) {
     from file("src/dist/client/vertxbus.js")
   }
   into('lib') {
-    from subprojects.configurations.platform
-    from subprojects.configurations.compile
+    from subprojects.configurations.compile    
+    from subprojects.jar
     // Don't just include everything!!
     includes = ["jackson*.jar", "netty*.jar", "hazelcast*.jar", "vertx*.jar"]
   }

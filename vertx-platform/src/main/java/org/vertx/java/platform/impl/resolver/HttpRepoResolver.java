@@ -16,35 +16,23 @@ package org.vertx.java.platform.impl.resolver;/*
  * @author <a href="http://tfox.org">Tim Fox</a>
  */
 
-import org.vertx.java.core.Handler;
 import org.vertx.java.core.Vertx;
-import org.vertx.java.core.buffer.Buffer;
-import org.vertx.java.core.http.HttpClient;
-import org.vertx.java.core.http.HttpClientRequest;
-import org.vertx.java.core.http.HttpClientResponse;
 import org.vertx.java.core.logging.Logger;
 import org.vertx.java.core.logging.impl.LoggerFactory;
 
 import java.net.URI;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicReference;
 
 public abstract class HttpRepoResolver implements RepoResolver {
 
   private static final Logger log = LoggerFactory.getLogger(HttpRepoResolver.class);
 
-  private final Vertx vertx;
-  private final String proxyHost;
-  private final int proxyPort;
+  protected final Vertx vertx;
   protected final String repoHost;
   protected final int repoPort;
   protected final String contentRoot;
 
-  public HttpRepoResolver(Vertx vertx, String proxyHost, int proxyPort, String repoID) {
+  public HttpRepoResolver(Vertx vertx, String repoID) {
     this.vertx = vertx;
-    this.proxyHost = proxyHost;
-    this.proxyPort = proxyPort;
     try {
       URI uri = new URI(repoID);
       repoHost = uri.getHost();
@@ -59,75 +47,6 @@ public abstract class HttpRepoResolver implements RepoResolver {
     }
   }
 
-  protected abstract String getRepoURI(String moduleName);
+  public abstract boolean getModule(String filename, String moduleName);
 
-  public Buffer getModule(final String moduleName) {
-    final CountDownLatch latch = new CountDownLatch(1);
-    final AtomicReference<Buffer> mod = new AtomicReference<>();
-    HttpClient client = vertx.createHttpClient();
-    if (proxyHost != null) {
-      client.setHost(proxyHost);
-      if (proxyPort != 80) {
-        client.setPort(proxyPort);
-      } else {
-        client.setPort(80);
-      }
-    } else {
-      client.setHost(repoHost);
-      client.setPort(repoPort);
-    }
-    client.exceptionHandler(new Handler<Exception>() {
-      public void handle(Exception e) {
-        log.error("Unable to connect to repository");
-        latch.countDown();
-      }
-    });
-    String uri = getRepoURI(moduleName);
-
-    if (proxyHost != null) {
-      // We use an absolute URI
-      uri = new StringBuilder("http://").append(repoHost).append(uri).toString();
-    }
-    final String theURI = uri;
-    HttpClientRequest req = client.get(uri, new Handler<HttpClientResponse>() {
-      public void handle(HttpClientResponse resp) {
-        if (resp.statusCode == 200) {
-          String msg = "Downloading module " + moduleName + " from http://"
-              + repoHost + ":" + repoPort + theURI;
-          if (proxyHost != null) {
-            msg += " Using proxy host " + proxyHost + ":" + proxyPort;
-          }
-          log.info(msg);
-          resp.bodyHandler(new Handler<Buffer>() {
-            public void handle(Buffer buffer) {
-              mod.set(buffer);
-              latch.countDown();
-            }
-          });
-        } else if (resp.statusCode == 404) {
-          latch.countDown();
-        } else {
-          log.error("Failed to query repository: " + resp.statusCode);
-          latch.countDown();
-        }
-      }
-    });
-    if (proxyHost != null){
-      req.putHeader("host", proxyHost);
-    } else {
-      req.putHeader("host", repoHost);
-    }
-    req.putHeader("user-agent", "Vert.x Module Installer");
-    req.end();
-    while (true) {
-      try {
-        if (!latch.await(30, TimeUnit.SECONDS)) {
-          throw new IllegalStateException("Timed out waiting to download module");
-        }
-        break;
-      } catch (InterruptedException ignore) {
-      }
-    }
-    return mod.get();
-  }
 }
